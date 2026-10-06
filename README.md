@@ -1,4 +1,4 @@
-# Checkpoint 5 — Transações locais em C#
+# Checkpoint 5 — Transações Locais em C#
 
 **FIAP — C# Software Development — Turma 3ESPH — 2026.2**
 
@@ -9,130 +9,341 @@
 - Gabriel Lacerda Araújo — RM558307
 - Julia Carolina Ferreira Silva — RM558896
 
-## Objetivo e tecnologia
+---
 
-Transferir valores entre contas com débito, crédito e registro em `TRANSFERENCIA` dentro da mesma transação local. Cada execução utiliza SQL Server ou Oracle separadamente. A aplicação usa C#, .NET 8 e ADO.NET, com Microsoft.Data.SqlClient 7.1.1 e Oracle.ManagedDataAccess.Core 23.26.301.
+## Sobre o projeto
 
-O programa valida contas existentes, ativas e distintas, valor positivo com até duas casas decimais e saldo suficiente. As consultas de validação mantêm bloqueios nas contas até o fim da transação. Todos os comandos recebem a mesma conexão/transação, e cada alteração deve afetar exatamente uma linha. No Oracle, `BindByName` associa parâmetros por nome.
+Aplicação console desenvolvida em C# para demonstrar o uso de **transações locais** com SQL Server e Oracle Database.
 
-`Commit()` ocorre após débito, crédito e histórico. Se houver exceção, `Rollback()` desfaz as alterações. O teste deliberado lança uma exceção após o débito. Falhas de conexão/configuração são informadas como erro e não representam teste de rollback. Uma falha no próprio rollback também é informada, sem afirmar que ele foi concluído.
+O cenário implementado simula uma transferência entre contas bancárias. Débito, crédito e registro da movimentação são executados dentro da mesma transação, garantindo que a operação seja confirmada integralmente com `Commit()` ou desfeita com `Rollback()` em caso de falha.
+
+O projeto também possui um modo de erro proposital, utilizado para demonstrar que alterações executadas antes de uma exceção não são persistidas quando a transação é revertida.
+
+### Tecnologias
+
+- C# / .NET 8
+- ADO.NET
+- Microsoft.Data.SqlClient 7.1.1
+- Oracle.ManagedDataAccess.Core 23.26.301
+- SQL Server
+- Oracle Database
+
+---
 
 ## Estrutura
 
 ```text
 CP5_TransacoesLocais.slnx
 README.md
+
 CP5_TransacoesLocais/
-  CP5_TransacoesLocais.csproj
-  Program.cs
-  scripts/
-    S01_SQLServer_Estrutura_Dados.sql
-    S02_Oracle_Estrutura_Dados.sql
-    S03_SQLServer_Testes_Commit_Rollback.sql
-    S04_Oracle_Testes_Commit_Rollback.sql
-  evidencias/
-    01_Estrutura.png
-    02_sqlserver_commit.png
-    03_sqlserver_rollback.png
-    04_oracle_commit.png
-    05_oracle_rollback.png
-    06_codigo_transacao.png
+├── CP5_TransacoesLocais.csproj
+├── Program.cs
+├── scripts/
+│   ├── S01_SQLServer_Estrutura_Dados.sql
+│   ├── S02_Oracle_Estrutura_Dados.sql
+│   ├── S03_SQLServer_Testes_Commit_Rollback.sql
+│   └── S04_Oracle_Testes_Commit_Rollback.sql
+└── evidencias/
+    ├── 01_Estrutura.png
+    ├── 02_sqlserver_commit.png
+    ├── 03_sqlserver_rollback.png
+    ├── 04_oracle_commit.png
+    ├── 05_oracle_rollback.png
+    └── 06_codigo_transacao.png
+
 verificacao/
-  Testar-SqlServer.ps1
-  resultado-sqlserver.txt
+├── Testar-SqlServer.ps1
+└── resultado-sqlserver.txt
 ```
 
-O modelo possui `CLIENTE`, `TIPO_CONTA`, `CONTA` e `TRANSFERENCIA`, com chaves estrangeiras entre elas. Os scripts usam os mesmos nomes de colunas nos dois bancos, incluindo `ContaOrigemId` e `ContaDestinoId`.
+O modelo utiliza as tabelas `CLIENTE`, `TIPO_CONTA`, `CONTA` e `TRANSFERENCIA`.
 
-## Preparação do SQL Server
+---
 
-Instale SQL Server LocalDB ou utilize uma instância disponível. Crie uma database própria, por exemplo `CP5_DB`, e selecione-a na ferramenta SQL. A criação da database pode ser feita no contexto administrativo; os scripts de tabelas devem ser executados dentro da database do exercício.
+## Executando com SQL Server
+
+Por padrão, a aplicação utiliza SQL Server LocalDB:
+
+```text
+Server=(localdb)\MSSQLLocalDB;
+Database=CP5_DB;
+Trusted_Connection=True;
+TrustServerCertificate=True;
+```
+
+### 1. Verificar o LocalDB
+
+```powershell
+sqllocaldb info
+```
+
+Caso a instância padrão esteja parada:
+
+```powershell
+sqllocaldb start MSSQLLocalDB
+```
+
+No SQL Server Management Studio, conecte-se utilizando:
+
+```text
+(localdb)\MSSQLLocalDB
+```
+
+com **Windows Authentication**.
+
+### 2. Criar o banco
 
 ```sql
 CREATE DATABASE CP5_DB;
+GO
+
+USE CP5_DB;
+GO
 ```
 
-Execute `CP5_TransacoesLocais/scripts/S01_SQLServer_Estrutura_Dados.sql` dentro de `CP5_DB`. **S01 recria as tabelas e apaga os dados anteriores do exercício.** O script recusa os bancos de sistema. A aplicação não cria bancos nem tabelas automaticamente.
+### 3. Criar a estrutura
 
-Por padrão, o programa conecta a `(localdb)\MSSQLLocalDB`, database `CP5_DB`, com autenticação integrada. Para outra database/instância, configure no PowerShell que executará o programa:
+Execute:
+
+```text
+CP5_TransacoesLocais/scripts/S01_SQLServer_Estrutura_Dados.sql
+```
+
+O script cria as tabelas e carrega os dados utilizados nos cenários de teste.
+
+> A execução do script recria as tabelas do exercício e remove os dados anteriores delas.
+
+### Outra instância SQL Server
+
+Caso seja utilizada outra instância, configure a conexão por variável de ambiente:
 
 ```powershell
-$env:CP5_SQLSERVER_CONNECTION_STRING = 'Server=SEU_SERVIDOR;Database=SUA_DATABASE_CP5;Integrated Security=True;TrustServerCertificate=True;'
+$env:CP5_SQLSERVER_CONNECTION_STRING = 'Server=SEU_SERVIDOR;Database=CP5_DB;Integrated Security=True;TrustServerCertificate=True;'
 ```
 
-## Preparação do Oracle
+---
 
-Utilize Oracle 12c ou superior, com suporte a colunas `IDENTITY`. Conecte com um usuário/schema próprio, nunca `SYS` ou `SYSTEM`. No Oracle XE local, use o serviço/PDB correto, normalmente `XEPDB1`; o usuário precisa de `CREATE SESSION`, `CREATE TABLE`, `CREATE SEQUENCE` e quota no tablespace. No ambiente institucional, use os privilégios fornecidos.
+## Executando com Oracle
 
-Execute `CP5_TransacoesLocais/scripts/S02_Oracle_Estrutura_Dados.sql` uma vez num schema do exercício sem essas tabelas. Para novos testes, use o bloco de reinicialização de S04. Se houver tabelas antigas com colunas diferentes, use um schema novo ou adapte-as antes da execução. Não execute DDL durante testes transacionais, pois o Oracle faz commits implícitos.
+Execute o script:
 
-Configure a conexão localmente, substituindo os marcadores e sem salvar a senha no projeto:
+```text
+CP5_TransacoesLocais/scripts/S02_Oracle_Estrutura_Dados.sql
+```
+
+em um schema Oracle destinado ao projeto.
+
+Configure a conexão:
 
 ```powershell
-$env:CP5_ORACLE_CONNECTION_STRING = 'User Id=SEU_USUARIO;Password=SUA_SENHA_AQUI;Data Source=localhost:1521/XEPDB1;'
+$env:CP5_ORACLE_CONNECTION_STRING = 'User Id=SEU_USUARIO;Password=SUA_SENHA;Data Source=HOST:PORTA/SERVICO;'
 ```
 
-No servidor institucional, substitua host, porta e serviço pelos dados fornecidos pela instituição. Desative o Auto-commit da ferramenta SQL para testes manuais de rollback.
+Exemplo com Oracle XE:
 
-## Executar
+```powershell
+$env:CP5_ORACLE_CONNECTION_STRING = 'User Id=SEU_USUARIO;Password=SUA_SENHA;Data Source=localhost:1521/XEPDB1;'
+```
 
-A partir da raiz do projeto, com SDK .NET 8 ou superior capaz de compilar `net8.0` e runtime .NET 8 instalado:
+---
+
+## Executando a aplicação
+
+Na raiz do repositório:
 
 ```powershell
 dotnet restore CP5_TransacoesLocais/CP5_TransacoesLocais.csproj
+
 dotnet build CP5_TransacoesLocais/CP5_TransacoesLocais.csproj
+
 dotnet run --project CP5_TransacoesLocais/CP5_TransacoesLocais.csproj
 ```
 
-O arquivo `.csproj` também pode ser aberto no Visual Studio. A solução `.slnx` requer uma versão da IDE/SDK com suporte a esse formato.
+O programa apresenta as opções:
 
-## Testar COMMIT e ROLLBACK
+```text
+1 - Executar Transferência no SQL Server
+2 - Executar Transferência no Oracle
+0 - Sair
+```
 
-Execute o roteiro separadamente para cada banco. Use S03 para consultar SQL Server e S04 para Oracle. As consultas mostram contas, soma dos saldos, histórico e quantidade de transferências. O bloco de reinicialização está comentado e deve ser executado separadamente para restaurar os dados iniciais antes de cada cenário.
+Após selecionar o banco, informe a conta de origem, conta de destino, valor e se deseja provocar uma falha para testar o rollback.
 
-1. Reinicialize os dados e consulte: `CC-1001 = 1000,00`, `CC-1002 = 500,00`, histórico vazio.
-2. Execute o programa, escolha o banco, origem `CC-1001`, destino `CC-1002`, valor `200` e resposta `N`.
-3. Consulte novamente: saldos `800,00` e `700,00`, total `1500,00`, um registro de `200,00` em `TRANSFERENCIA` com origem/destino corretos.
-4. Reinicialize os dados e consulte o estado inicial novamente.
-5. Repita a transferência com resposta `S`. A falha ocorre após um débito real dentro da transação.
-6. Consulte após o ROLLBACK: saldos `1000,00` e `500,00`, total `1500,00`, histórico vazio.
+---
 
-Também verifique saldo insuficiente, conta inexistente, conta repetida, conta inativa, valor zero/negativo e fração de centavo. Nenhum desses casos deve confirmar uma transferência.
+## Fluxo da transação
+
+Em uma operação concluída normalmente:
+
+```text
+Débito
+  ↓
+Crédito
+  ↓
+Registro em TRANSFERENCIA
+  ↓
+COMMIT
+```
+
+Se ocorrer uma exceção:
+
+```text
+Débito
+  ↓
+Falha
+  ↓
+ROLLBACK
+```
+
+O rollback desfaz as alterações realizadas dentro da transação, evitando que a operação seja persistida parcialmente.
+
+---
+
+## Cenário de COMMIT
+
+Estado inicial:
+
+```text
+CC-1001 = 1000,00
+CC-1002 = 500,00
+```
+
+Transferência:
+
+```text
+Origem: CC-1001
+Destino: CC-1002
+Valor: 200
+Erro proposital: N
+```
+
+Resultado esperado:
+
+```text
+CC-1001 = 800,00
+CC-1002 = 700,00
+```
+
+Além da atualização dos saldos, deve existir um novo registro de `200,00` em `TRANSFERENCIA`.
+
+---
+
+## Cenário de ROLLBACK
+
+Após restaurar o cenário inicial:
+
+```text
+CC-1001 = 1000,00
+CC-1002 = 500,00
+```
+
+execute:
+
+```text
+Origem: CC-1001
+Destino: CC-1002
+Valor: 200
+Erro proposital: S
+```
+
+A exceção é provocada após o débito da conta de origem.
+
+Depois do rollback, o estado deve permanecer:
+
+```text
+CC-1001 = 1000,00
+CC-1002 = 500,00
+```
+
+Nenhum registro referente à tentativa deve permanecer em `TRANSFERENCIA`.
+
+---
+
+## Consultas de verificação
+
+Os scripts:
+
+```text
+S03_SQLServer_Testes_Commit_Rollback.sql
+S04_Oracle_Testes_Commit_Rollback.sql
+```
+
+auxiliam na validação dos cenários.
+
+No SQL Server, as principais consultas são:
+
+```sql
+SELECT Numero, Saldo
+FROM CONTA
+WHERE Numero IN ('CC-1001', 'CC-1002');
+
+SELECT SUM(Saldo) AS SaldoTotal
+FROM CONTA
+WHERE Numero IN ('CC-1001', 'CC-1002');
+
+SELECT *
+FROM TRANSFERENCIA;
+```
+
+---
+
+## Validações
+
+Antes da transferência, a aplicação verifica:
+
+- existência das contas;
+- contas ativas;
+- origem e destino diferentes;
+- valor positivo;
+- até duas casas decimais;
+- saldo suficiente.
+
+Uma transferência inválida não é confirmada.
+
+---
 
 ## Testes automatizados
 
-O script `verificacao/Testar-SqlServer.ps1` verifica COMMIT, ROLLBACK após o débito, falha na gravação do histórico e validações da operação. Também verifica o tratamento de configuração ausente do Oracle. Os testes transacionais automatizados utilizam SQL Server LocalDB.
+O script:
 
-Cada execução cria uma database isolada, preservada para consulta, sem alterar a database configurada para uso normal. É necessário ter `sqlcmd` e SQL Server LocalDB disponíveis.
+```text
+verificacao/Testar-SqlServer.ps1
+```
+
+executa automaticamente os principais cenários no SQL Server LocalDB, incluindo COMMIT, ROLLBACK e validações da operação.
 
 ```powershell
 dotnet build CP5_TransacoesLocais/CP5_TransacoesLocais.csproj --artifacts-path "$env:TEMP/CP5-validacao-artifacts"
+
 ./verificacao/Testar-SqlServer.ps1
 ```
 
-O roteiro da seção anterior permite reproduzir os testes de COMMIT e ROLLBACK nos dois bancos.
+O resultado pode ser consultado em:
+
+```text
+verificacao/resultado-sqlserver.txt
+```
+
+---
 
 ## Evidências
 
-As evidências estão na pasta `CP5_TransacoesLocais/evidencias` e estão organizadas por cenário:
-
-| Evidência | Arquivo | Conteúdo |
+| Evidência | Arquivo | Descrição |
 |---|---|---|
-| E01 | [01_Estrutura.png](CP5_TransacoesLocais/evidencias/01_Estrutura.png) | Estrutura da solução e organização dos arquivos do projeto |
-| E02 | [02_sqlserver_commit.png](CP5_TransacoesLocais/evidencias/02_sqlserver_commit.png) | Transferência com COMMIT no SQL Server, saldos e histórico |
-| E03 | [03_sqlserver_rollback.png](CP5_TransacoesLocais/evidencias/03_sqlserver_rollback.png) | Falha deliberada e ROLLBACK no SQL Server, com preservação dos saldos e histórico |
-| E04 | [04_oracle_commit.png](CP5_TransacoesLocais/evidencias/04_oracle_commit.png) | Transferência com COMMIT no Oracle, saldos e histórico |
-| E05 | [05_oracle_rollback.png](CP5_TransacoesLocais/evidencias/05_oracle_rollback.png) | Falha deliberada e ROLLBACK no Oracle, com preservação dos saldos e histórico |
-| E06 | [06_codigo_transacao.png](CP5_TransacoesLocais/evidencias/06_codigo_transacao.png) | Código de início da transação, débito, crédito, histórico, COMMIT e ROLLBACK |
+| E01 | [01_Estrutura.png](CP5_TransacoesLocais/evidencias/01_Estrutura.png) | Estrutura do projeto |
+| E02 | [02_sqlserver_commit.png](CP5_TransacoesLocais/evidencias/02_sqlserver_commit.png) | COMMIT no SQL Server e persistência dos saldos e histórico |
+| E03 | [03_sqlserver_rollback.png](CP5_TransacoesLocais/evidencias/03_sqlserver_rollback.png) | ROLLBACK no SQL Server e preservação do estado anterior |
+| E04 | [04_oracle_commit.png](CP5_TransacoesLocais/evidencias/04_oracle_commit.png) | COMMIT no Oracle |
+| E05 | [05_oracle_rollback.png](CP5_TransacoesLocais/evidencias/05_oracle_rollback.png) | ROLLBACK no Oracle |
+| E06 | [06_codigo_transacao.png](CP5_TransacoesLocais/evidencias/06_codigo_transacao.png) | Implementação da transação no código |
+
+---
 
 ## Atomicidade
 
-Débito, crédito e registro da transferência formam uma única unidade de trabalho. O COMMIT confirma o conjunto somente após a conclusão de todas as etapas. Se uma etapa falhar, o ROLLBACK desfaz as alterações da transação, impedindo que um débito permaneça sem o crédito correspondente ou que um histórico parcial seja gravado.
+Débito, crédito e histórico pertencem à mesma unidade de trabalho.
 
-## Configuração e credenciais
+O `Commit()` só é executado após a conclusão de todas as etapas. Caso qualquer etapa falhe, o `Rollback()` desfaz as alterações realizadas durante a transação.
 
-As strings de conexão são configuradas por variáveis de ambiente. Os exemplos deste README utilizam marcadores que devem ser substituídos localmente. Senhas e configurações pessoais não devem ser incluídas no código, nos scripts ou nas imagens.
-
-## Entrega
-
-O arquivo deve seguir o padrão `CP5_NOME_RM.zip`, com o nome e RM do integrante responsável pelo envio. O pacote deve incluir o projeto, os scripts SQL, as seis evidências e este README, sem pastas `bin/`, `obj/`, `.vs/` ou arquivos locais com credenciais.
+Esse comportamento impede estados inconsistentes, como uma conta ser debitada sem que o valor seja creditado na conta de destino.
